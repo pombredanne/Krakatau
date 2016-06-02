@@ -1,6 +1,7 @@
-from .base import BaseJump
 from .. import ssa_types
 from ..constraints import IntConstraint, ObjectConstraint
+
+from .base import BaseJump
 from .goto import Goto
 
 class If(BaseJump):
@@ -8,11 +9,11 @@ class If(BaseJump):
 
     def __init__(self, parent, cmp, successors, arguments):
         super(If, self).__init__(parent, arguments)
-        assert(cmp in ('eq','ne','lt','ge','gt','le'))
+        assert cmp in ('eq','ne','lt','ge','gt','le')
         self.cmp = cmp
         self.successors = successors
         self.isObj = (arguments[0].type == ssa_types.SSA_OBJECT)
-        assert(None not in successors)
+        assert None not in successors
 
     def replaceBlocks(self, blockDict):
         self.successors = [blockDict.get(key,key) for key in self.successors]
@@ -39,12 +40,12 @@ class If(BaseJump):
 
             results = func(x,y)
             if None in results:
-                assert(results == (None,None))
+                assert results == (None,None)
                 impossible.append((child,False))
         return self.reduceSuccessors(impossible)
 
     def getSuccessorConstraints(self, (block, t)):
-        assert(t is False)
+        assert t is False
         cmp_t = If.opposites[self.cmp] if block == self.successors[0] else self.cmp
 
         if self.isObj:
@@ -72,7 +73,7 @@ class If(BaseJump):
                 if cmp_t == 'ge' or cmp_t == 'gt':
                     x1, x2, y1, y2 = y1, y2, x1, x2
 
-                #treat greater like less than swap before and afterwards
+                # treat greater like less than swap before and afterwards
                 if cmp_t == 'lt' or cmp_t == 'gt':
                     x2 = min(x2, y2-1)
                     y1 = max(x1+1, y1)

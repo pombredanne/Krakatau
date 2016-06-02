@@ -1,112 +1,192 @@
-'''Script for testing the decompiler.
-
-On the first run tests/*.test files will be created with expected results for each test.
-
-To generate a test's result file, run with `--create-only`.
-To add a new test, add the relevant classfile and an entry in tests.registry.
-'''
-import os, shutil, tempfile, time
+import hashlib
+import json
+import multiprocessing
+import os
+import shutil
 import subprocess
-import cPickle as pickle
-import optparse
+import sys
+import tempfile
+import time
 
+from Krakatau import script_util
+from Krakatau.assembler.tokenize import AsssemblerError
 import decompile
+import disassemble
+import assemble
 import tests
 
 # Note: If this script is moved, be sure to update this path.
 krakatau_root = os.path.dirname(os.path.abspath(__file__))
-test_location = os.path.join(krakatau_root, 'tests')
-class_location = os.path.join(test_location, 'classes')
+cache_location = os.path.join(krakatau_root, 'tests', '.cache')
+dec_class_location = os.path.join(krakatau_root, 'tests', 'decompiler', 'classes')
+dis_class_location = os.path.join(krakatau_root, 'tests', 'disassembler', 'classes')
+
+class TestFailed(Exception):
+    pass
 
 def execute(args, cwd):
+    print 'executing command', args, 'in directory', cwd
     process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
     return process.communicate()
 
-def createTest(target):
-    print 'Generating {}.test'.format(target)
-    results = [execute(['java', target] + arg_list, cwd=class_location)
-               for arg_list in tests.registry[target]]
-    testfile = os.path.join(test_location, target) + '.test'
-    with open(testfile, 'wb') as f:
-        pickle.dump(results, f, -1)
-    return results
+def read(filename):
+    with open(filename, 'rb') as f:
+        return f.read()
 
-def loadTest(name):
-    with open(os.path.join(test_location, name) + '.test', 'rb') as f:
-        return pickle.load(f)
+def shash(data): return hashlib.sha256(data).hexdigest()
 
-def performTest(target, expected_results, tempbase=tempfile.gettempdir()):
-    temppath = os.path.join(tempbase, target)
+###############################################################################
+def _runJava(target, in_fname, argslist):
+    tdir = tempfile.mkdtemp()
+    shutil.copy2(in_fname, os.path.join(tdir, target + '.class'))
 
-    cpath = [decompile.findJRE(), class_location]
-    if None in cpath:
+    for args in argslist:
+        results = execute(['java', target] + list(args), cwd=tdir)
+        assert 'VerifyError' not in results[1]
+        assert 'ClassFormatError' not in results[1]
+        yield results
+
+    shutil.rmtree(tdir)
+
+def runJava(target, in_fname, argslist):
+    digest = shash(read(in_fname) + json.dumps(argslist).encode())
+    cache = os.path.join(cache_location, digest)
+    try:
+        with open(cache, 'r') as f:
+            return json.load(f)
+    except IOError:
+        print 'failed to load cache', digest
+
+    results = list(_runJava(target, in_fname, argslist))
+    with open(cache, 'w') as f:
+        json.dump(results, f)
+    # reparse json to ensure consistent results in 1st time vs cache hit
+    with open(cache, 'r') as f:
+        return json.load(f)
+
+def compileJava(target, in_fname):
+    assert not in_fname.endswith('.class')
+    digest = shash(read(in_fname))
+    cache = os.path.join(cache_location, digest)
+
+    if not os.path.exists(cache):
+        tdir = tempfile.mkdtemp()
+        shutil.copy2(in_fname, os.path.join(tdir, target + '.java'))
+
+        _, stderr = execute(['javac', target + '.java', '-g:none'], cwd=tdir)
+        if 'error:' in stderr: # Ignore compiler unchecked warnings by looking for 'error:'
+            raise TestFailed('Compile failed: ' + stderr)
+        shutil.copy2(os.path.join(tdir, target + '.class'), cache)
+
+        shutil.rmtree(tdir)
+    return cache
+
+def runJavaAndCompare(target, testcases, good_fname, new_fname):
+    expected_results = runJava(target, good_fname, testcases)
+    actual_results = runJava(target, new_fname, testcases)
+
+    for args, expected, actual in zip(testcases, expected_results, actual_results):
+        if expected != actual:
+            message = ['Failed test {} w/ args {}:'.format(target, args)]
+            if actual[0] != expected[0]:
+                message.append('  expected stdout: ' + repr(expected[0]))
+                message.append('  actual stdout  : ' + repr(actual[0]))
+            if actual[1] != expected[1]:
+                message.append('  expected stderr: ' + repr(expected[1]))
+                message.append('  actual stderr  : ' + repr(actual[1]))
+            raise TestFailed('\n'.join(message))
+
+def runDecompilerTest(target, testcases):
+    print 'Running decompiler test {}...'.format(target)
+    tdir = tempfile.mkdtemp()
+
+    cpath = [decompile.findJRE(), dec_class_location]
+    if cpath[0] is None:
         raise RuntimeError('Unable to locate rt.jar')
 
-    # Clear any pre-existing files and create directory if necessary
-    # try:
-    #     shutil.rmtree(temppath)
-    # except OSError as e:
-    #     print e
+    decompile.decompileClass(cpath, targets=[target], outpath=tdir, add_throws=True)
+    new_fname = compileJava(target, os.path.join(tdir, target + '.java'))
+
+    # testcases = map(tuple, tests.decompiler.registry[target])
+    good_fname = os.path.join(dec_class_location, target + '.class')
+    runJavaAndCompare(target, testcases, good_fname, new_fname)
+    shutil.rmtree(tdir)
+
+def runDisassemblerTest(target, testcases):
+    print 'Running disassembler test {}...'.format(target)
+    tdir = tempfile.mkdtemp()
+
+    classloc = os.path.join(dis_class_location, target + '.class')
+    jloc = os.path.join(tdir, target + '.j')
+
+    disassemble.disassembleClass(disassemble.readFile, targets=[classloc], outpath=tdir)
+    pairs = assemble.assembleClass(jloc)
+    new_fname = os.path.join(tdir, target + '.class')
+
+    for name, data in pairs:
+        assert name == target
+        with open(new_fname, 'wb') as f:
+            f.write(data)
+
+    good_fname = os.path.join(dis_class_location, target + '.class')
+    runJavaAndCompare(target, testcases, good_fname, new_fname)
+    shutil.rmtree(tdir)
+
+def runAssemblerTest(fname, exceptFailure):
+    print 'Running assembler test', os.path.basename(fname)
+    error = False
     try:
-        os.mkdir(temppath)
-    except OSError as e:
-        print e
-    assert(os.path.isdir(temppath))
+        assemble.assembleClass(fname, fatal=True)
+    except AsssemblerError:
+        error = True
+    assert error == exceptFailure
 
-    decompile.decompileClass(cpath, targets=[target], outpath=temppath)
-    # out, err = execute(['java',  '-jar', 'procyon-decompiler-0.5.25.jar', os.path.join(class_location, target+'.class')], '.')
-    # if err:
-    #     print 'Decompile errors:', err
-    #     return False
-    # with open(os.path.join(temppath, target+'.java'), 'wb') as f:
-    #     f.write(out)
+def runTest(data):
+    try:
+        {
+            'decompiler': runDecompilerTest,
+            'disassembler': runDisassemblerTest,
+            'assembler': runAssemblerTest,
+        }[data[0]](*data[1:])
+    except Exception:
+        import traceback
+        return 'Test {} failed:\n'.format(data) + traceback.format_exc()
 
-    print 'Attempting to compile'
-    _, stderr = execute(['javac', target+'.java', '-g:none'], cwd=temppath)
-    if stderr:
-        print 'Compile failed:'
-        print stderr
-        return False
-
-    cases = tests.registry[target]
-    for args, expected in zip(cases, expected_results):
-        print 'Executing {} w/ args {}'.format(target, args)
-        result = execute(['java', target] + list(args), cwd=temppath)
-        if result != expected:
-            print 'Failed test {} w/ args {}:'.format(target, args)
-            if result[0] != expected[0]:
-                print '  expected stdout:', repr(expected[0])
-                print '  actual stdout  :', repr(result[0])
-            if result[1] != expected[1]:
-                print '  expected stderr:', repr(expected[1])
-                print '  actual stderr  :', repr(result[1])
-            return False
-    return True
+def addAssemblerTests(testlist, basedir, exceptFailure):
+    for fname in os.listdir(basedir):
+        if fname.endswith('.j'):
+            testlist.append(('assembler', os.path.join(basedir, fname), exceptFailure))
 
 if __name__ == '__main__':
-    op = optparse.OptionParser(usage='Usage: %prog [options] [testfile(s)]',
-                               description=__doc__)
-    op.add_option('-c', '--create-only', action='store_true',
-                  help='Generate cache of expected results')
-    opts, args = op.parse_args()
+    args = sys.argv[1] if len(sys.argv) > 1 else 'dsa'
 
-    # Set up the tests list.
-    targets = args if args else sorted(tests.registry)
+    try:
+        os.mkdir(cache_location)
+    except OSError:
+        pass
 
-    results = {}
     start_time = time.time()
-    for test in targets:
-        print 'Doing test {}...'.format(test)
-        try:
-            expected_results = loadTest(test)
-        except IOError:
-            expected_results = createTest(test)
+    testlist = []
 
-        if not opts.create_only:
-            results[test] = performTest(test, expected_results)
+    if 'd' in args:
+        for target, testcases in sorted(tests.decompiler.registry.items()):
+            testlist.append(('decompiler', target, map(tuple, testcases)))
+    if 's' in args:
+        for target, testcases in sorted(tests.disassembler.registry.items()):
+            testlist.append(('disassembler', target, map(tuple, testcases)))
 
-    print '\nTest results:'
-    for test in targets:
-        print '  {}: {}'.format(test, 'Pass' if results[test] else 'Fail')
-    print '{}/{} tests passed'.format(sum(results.itervalues()), len(results))
-    print 'elapsed time:', time.time()-start_time
+    if 'a' in args:
+        test_base = os.path.join(krakatau_root, 'tests')
+        addAssemblerTests(testlist, os.path.join(test_base, 'assembler', 'bad'), True)
+        addAssemblerTests(testlist, os.path.join(test_base, 'assembler', 'good'), False)
+        addAssemblerTests(testlist, os.path.join(test_base, 'decompiler', 'source'), False)
+        addAssemblerTests(testlist, os.path.join(test_base, 'disassembler', 'source'), False)
+
+    print len(testlist), 'test cases found'
+    for error in multiprocessing.Pool(processes=5).map(runTest, testlist):
+        if error:
+            print error
+            break
+    else:
+        print 'All {} tests passed!'.format(len(testlist))
+        print 'elapsed time:', time.time()-start_time

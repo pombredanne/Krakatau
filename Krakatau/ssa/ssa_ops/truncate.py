@@ -1,6 +1,7 @@
-from .base import BaseOp
-from ..constraints import IntConstraint
+from ..constraints import IntConstraint, return_
+
 from . import bitwise_util
+from .base import BaseOp
 
 class Truncate(BaseOp):
     def __init__(self, parent, arg, signed, width):
@@ -10,16 +11,16 @@ class Truncate(BaseOp):
         self.rval = parent.makeVariable(arg.type, origin=self)
 
     def propagateConstraints(self, x):
-        #get range of target type
+        # get range of target type
         w = self.width
         intw = x.width
-        assert(w < intw)
+        assert w < intw
         M = 1<<w
 
         mask = IntConstraint.const(intw, M-1)
         x = bitwise_util.propagateAnd(x,mask)
 
-        #We have the mods in the range [0,M-1], but we want it in the range
+        # We have the mods in the range [0,M-1], but we want it in the range
         # [-M/2, M/2-1] so we need to find the new min and max
         if self.signed:
             HM = M>>1
@@ -30,7 +31,7 @@ class Truncate(BaseOp):
             if x.min <= HM <= x.max:
                 parts.append(-HM)
 
-            assert(-HM <= min(parts) <= max(parts) <= HM-1)
-            return IntConstraint.range(intw, min(parts), max(parts)), None, None
+            assert -HM <= min(parts) <= max(parts) <= HM-1
+            return return_(IntConstraint.range(intw, min(parts), max(parts)))
         else:
-            return x, None, None
+            return return_(x)

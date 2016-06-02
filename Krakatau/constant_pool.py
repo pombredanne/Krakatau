@@ -1,11 +1,12 @@
-import struct, collections
+import collections
+import struct
 
-#ConstantPool stores strings as strings or unicodes. They are automatically
-#converted to and from modified Utf16 when reading and writing to binary
+# ConstantPool stores strings as strings or unicodes. They are automatically
+# converted to and from modified Utf16 when reading and writing to binary
 
-#Floats and Doubles are internally stored as integers with the same bit pattern
-#Since using raw floats breaks equality testing for signed zeroes and NaNs
-#cpool.getArgs/getArgsCheck will automatically convert them into Python floats
+# Floats and Doubles are internally stored as integers with the same bit pattern
+# Since using raw floats breaks equality testing for signed zeroes and NaNs
+# cpool.getArgs/getArgsCheck will automatically convert them into Python floats
 
 def decodeStr(s):
     return s.replace('\xc0\x80','\0').decode('utf8'),
@@ -16,7 +17,7 @@ def strToBytes(args):
     return struct.pack('>H',len(s)) + s
 
 def decodeFloat(i):
-    return struct.unpack('>f', struct.pack('>i', i)) #Note: returns tuple
+    return struct.unpack('>f', struct.pack('>i', i)) # Note: returns tuple
 def decodeDouble(i):
     return struct.unpack('>d', struct.pack('>q', i))
 
@@ -100,7 +101,7 @@ class ConstPool(object):
                     val = decodeStr(*val)
                 self.pool.append((t.name, val))
 
-    def size(self): #Number of slots including gaps, not number of entries
+    def size(self): # Number of slots including gaps, not number of entries
         return len(self.pool)
     def getPoolIter(self):
         return (x for x in self.pool if x[0] is not None)
@@ -137,7 +138,7 @@ class ConstPool(object):
             return self.pool.index(item)
 
         if item[0] == 'Utf8':
-            assert(isinstance(item[1][0], basestring))
+            assert isinstance(item[1][0], basestring)
         cat2 = item[0] in ('Long','Double')
 
         if index is None:
@@ -145,7 +146,7 @@ class ConstPool(object):
         else:
             temp = len(self.pool)
             if index >= temp:
-                #If desired slot is past the end of current range, add a bunch of placeholder slots
+                # If desired slot is past the end of current range, add a bunch of placeholder slots
                 self.pool += [(None,None)] * (index+1-temp)
                 self.available.update(range(temp,index))
                 self.available -= self.reserved
@@ -155,7 +156,7 @@ class ConstPool(object):
                 self.reserved.remove(index+1)
                 self.addEmptySlot()
 
-        assert(index not in self.reserved)
+        assert index not in self.reserved
         self.pool[index] = item
         return index
 
@@ -174,8 +175,8 @@ class ConstPool(object):
         return t.recoverArgs(self, *val)
 
     def getArgsCheck(self, typen, index):
-        if (self.pool[index][0] != typen):
-            raise KeyError('Constant pool index {} has incorrect type {}'.format(index, typen))
+        # if (self.pool[index][0] != typen):
+        #     raise KeyError('Constant pool index {} has incorrect type {}'.format(index, typen))
         val = self.getArgs(index)
         return val if len(val) > 1 else val[0]
 
@@ -183,9 +184,9 @@ class ConstPool(object):
 
     ##################################################################################
     def fillPlaceholders(self):
-        #fill in all the placeholder slots with a dummy reference. Class and String items
-        #have the smallest size (3 bytes). There should always be an existing class item
-        #we can copy
+        # fill in all the placeholder slots with a dummy reference. Class and String items
+        # have the smallest size (3 bytes). There should always be an existing class item
+        # we can copy
         dummy = next(item for item in self.pool if item[0] == 'Class')
         for i in self.available:
             self.pool[i] = dummy
@@ -194,10 +195,10 @@ class ConstPool(object):
         parts = []
         pool = self.pool
 
-        assert(not self.reserved)
+        assert not self.reserved
         self.fillPlaceholders()
 
-        assert(len(pool) <= 65535)
+        assert len(pool) <= 65535
         parts.append(struct.pack('>H',len(pool)))
 
         for name, vals in self.getPoolIter():

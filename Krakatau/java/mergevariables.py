@@ -1,6 +1,6 @@
 import heapq
 
-from .cfg import makeGraph, flattenDict
+from .cfg import flattenDict, makeGraph
 
 # Variables x and y can safely be merged when it is true that for any use of y (respectively x)
 # that sees a definition of y, either there are no intervening definitions of x, or x was known
@@ -25,8 +25,10 @@ class EqualityData(object):
         # None represents the top value (i.e. this point has not been visited yet)
         self.d = d.copy() if d is not None else None
 
-    def initialize(self): #initialize to bottom value (all variables unequal)
-        assert(self.d is None)
+    def _newval(self): return object()
+
+    def initialize(self): # initialize to bottom value (all variables unequal)
+        assert self.d is None
         self.d = {}
 
     def handleAssign(self, var1, var2=None):
@@ -36,11 +38,11 @@ class EqualityData(object):
             if var1 in self.d:
                 del self.d[var1]
         else:
-            self.d[var1] = self.d.setdefault(var2, object())
-            assert(self.iseq(var1, var2))
+            self.d[var1] = self.d.setdefault(var2, self._newval())
+            assert self.iseq(var1, var2)
 
     def iseq(self, var1, var2):
-        assert(var1 != var2)
+        assert var1 != var2
         return var1 in self.d and var2 in self.d and self.d[var1] is self.d[var2]
 
     def merge_update(self, other):
@@ -57,7 +59,7 @@ class EqualityData(object):
                 matches = [k for k in todo if d1[k] is d1[cur] and d2[k] is d2[cur]]
                 if not matches:
                     continue
-                new[cur] = object()
+                new[cur] = self._newval()
                 for k in matches:
                     new[k] = new[cur]
                 todo = [k for k in todo if k not in new]
@@ -116,21 +118,21 @@ def calcEqualityData(graph):
                     dirty.add(suc)
 
     for block in blocks:
-        assert(d[block][0].d is not None)
-    assert(not dirty)
+        assert d[block][0].d is not None
+    assert not dirty
     return d
 
 class VarMergeInfo(object):
     def __init__(self, graph, methodparams, isstatic):
         self.info = {}
         self.final, self.unmergeable, self.external = set(), set(), set()
-        self.equality = None #to be calculated later
+        self.equality = None # to be calculated later
         self.graph = graph
 
         self.pending_graph_replaces = {}
         self.touched_vars = set()
 
-        #initialize variables and assignment data
+        # initialize variables and assignment data
         for var in methodparams:
             self._addvar(var)
         self.external.update(methodparams)
@@ -146,7 +148,7 @@ class VarMergeInfo(object):
                 self.external.add(caught)
                 self.unmergeable.add(caught)
 
-    #initialization helper funcs
+    # initialization helper funcs
     def _addvar(self, v):
         return self.info.setdefault(v, VarInfo(len(self.info)))
 
@@ -158,7 +160,7 @@ class VarMergeInfo(object):
         else:
             info.extracount += 1
 
-    #process helper guncs
+    # process helper funcs
     def iseq(self, block, index, v1, v2):
         return self.equality[block][index].iseq(v1, v2)
 
@@ -172,7 +174,7 @@ class VarMergeInfo(object):
             self._doGraphReplacements()
 
         blocks = self.graph.blocks
-        vok = {b:3 for b in blocks} #use bitmask v1ok = 1<<0, v2ok = 1<<1
+        vok = {b:3 for b in blocks} # use bitmask v1ok = 1<<0, v2ok = 1<<1
 
         stack = [b for b in blocks if v1 in b.vars or v2 in b.vars]
         while stack:
@@ -198,7 +200,7 @@ class VarMergeInfo(object):
                     elif line_t == 'canthrow':
                         e_out &= cur
             else:
-                #v1 and v2 not touched in this block, so there is nothing to do
+                # v1 and v2 not touched in this block, so there is nothing to do
                 e_out = cur
 
             for out, successors in [(e_out, block.e_successors), (cur, block.n_successors)]:
@@ -226,14 +228,14 @@ class VarMergeInfo(object):
                 candidate_set = candidate_set - final
             candidates = [v for v in candidate_set if v.dtype == cur.dtype]
             candidates = sorted(candidates, key=lambda v:d[v].key)
-            assert(cur not in candidates)
+            assert cur not in candidates
 
-            #find first candidate that is actually compatible
+            # find first candidate that is actually compatible
             for parent in candidates:
                 if self.compat(cur, parent, doeq):
                     break
             else:
-                continue #no candidates found
+                continue # no candidates found
 
             replace[cur] = parent
             self.pending_graph_replaces[cur] = parent
@@ -241,7 +243,7 @@ class VarMergeInfo(object):
             self.touched_vars.add(parent)
 
             infc, infp = d[cur], d[parent]
-            #Be careful, there could be a loop with cur in parent.defs
+            # Be careful, there could be a loop with cur in parent.defs
             infc.defs.remove(parent)
             infc.rdefs.discard(parent)
             infp.rdefs.remove(cur)
@@ -272,7 +274,7 @@ class VarMergeInfo(object):
 
 ###############################################################################
 def mergeVariables(root, isstatic, parameters):
-    #first, create CFG from the Java AST
+    # first, create CFG from the Java AST
     graph = makeGraph(root)
     mergeinfo = VarMergeInfo(graph, parameters, isstatic)
 

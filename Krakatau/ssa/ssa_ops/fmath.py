@@ -1,5 +1,7 @@
+from .. import ssa_types
+from ..constraints import IntConstraint, return_
+
 from .base import BaseOp
-from ..constraints import IntConstraint
 
 class FAdd(BaseOp):
     def __init__(self, parent, args):
@@ -22,13 +24,12 @@ class FSub(BaseOp):
         BaseOp.__init__(self, parent, args)
         self.rval = parent.makeVariable(args[0].type, origin=self)
 
-#Unary, unlike the others
+# Unary, unlike the others
 class FNeg(BaseOp):
     def __init__(self, parent, args):
         BaseOp.__init__(self, parent, args)
         self.rval = parent.makeVariable(args[0].type, origin=self)
 
-from .. import ssa_types
 class FCmp(BaseOp):
     def __init__(self, parent, args, NaN_val):
         BaseOp.__init__(self, parent, args)
@@ -36,5 +37,4 @@ class FCmp(BaseOp):
         self.NaN_val = NaN_val
 
     def propagateConstraints(self, x, y):
-        rvalcons = IntConstraint.range(32, -1, 1)
-        return rvalcons, None, None
+        return return_(IntConstraint.range(32, -1, 1))

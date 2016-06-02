@@ -3,18 +3,18 @@ import struct
 from ..ssa import objtypes
 from ..verifier.descriptors import parseFieldDescriptor
 
-from . import ast, ast2, javamethod
+from . import ast, ast2, javamethod, throws
 from .reserved import reserved_identifiers
 
 def loadConstValue(cpool, index):
     entry_type = cpool.pool[index][0]
     args = cpool.getArgs(index)
 
-    #Note: field constant values cannot be class literals
+    # Note: field constant values cannot be class literals
     tt = {'Int':objtypes.IntTT, 'Long':objtypes.LongTT,
         'Float':objtypes.FloatTT, 'Double':objtypes.DoubleTT,
         'String':objtypes.StringTT}[entry_type]
-    return ast.Literal(tt, args[0])
+    return ast.Literal(tt, args[0]).fixLiterals()
 
 def _getField(field):
     flags = [x.lower() for x in sorted(field.flags) if x not in ('SYNTHETIC','ENUM')]
@@ -26,7 +26,7 @@ def _getField(field):
         cpool = field.class_.cpool
         const_attrs = [data for name,data in field.attributes if name == 'ConstantValue']
         if const_attrs:
-            assert(len(const_attrs) == 1)
+            assert len(const_attrs) == 1
             data = const_attrs[0]
             index = struct.unpack('>h', data)[0]
             initexpr = loadConstValue(cpool, index)
@@ -50,7 +50,7 @@ def _getMethod(method, cb, forbidden_identifiers, skip_errors):
         return code_ast
 
 # Method argument allows decompilng only a single method, primarily useful for debugging
-def generateAST(cls, cb, skip_errors, method=None):
+def generateAST(cls, cb, skip_errors, method=None, add_throws=False):
     methods = cls.methods if method is None else [cls.methods[method]]
     fi = set(reserved_identifiers)
     for field in cls.fields:
@@ -61,8 +61,10 @@ def generateAST(cls, cb, skip_errors, method=None):
     isInterface = 'INTERFACE' in cls.flags
 
     superc = cls.supername
-    interfaces = [cls.cpool.getArgsCheck('Class', index) for index in cls.interfaces_raw] #todo - change when class actually loads interfaces
+    interfaces = [cls.cpool.getArgsCheck('Class', index) for index in cls.interfaces_raw] # todo - change when class actually loads interfaces
 
     field_defs = [_getField(f) for f in cls.fields]
     method_defs = [_getMethod(m, cb, forbidden_identifiers, skip_errors) for m in methods]
+    if add_throws:
+        throws.addSingle(cls.env, method_defs)
     return ast2.ClassDef(' '.join(myflags), isInterface, cls.name, superc, interfaces, field_defs, method_defs)

@@ -1,7 +1,8 @@
 import collections
 
-from . import binUnpacker, bytecode
-from .attributes_raw import get_attributes_raw, fixAttributeNames
+from . import bytecode
+from .attributes_raw import fixAttributeNames, get_attributes_raw
+from .classfileformat.reader import Reader
 
 exceptionHandlerRaw = collections.namedtuple("exceptionHandlerRaw",
                                              ["start","end","handler","type_ind"])
@@ -11,10 +12,10 @@ class Code(object):
         self.method = method
         self.class_ = method.class_
 
-        #Old versions use shorter fields for stack, locals, and code length
+        # Old versions use shorter fields for stack, locals, and code length
         field_fmt = ">HHL" if self.class_.version > (45,2) else ">BBH"
         self.stack, self.locals, codelen = bytestream.get(field_fmt)
-        assert(codelen > 0 and codelen < 65536)
+        # assert codelen > 0 and codelen < 65536
         self.bytecode_raw = bytestream.getRaw(codelen)
         self.codelen = codelen
 
@@ -22,24 +23,24 @@ class Code(object):
         self.except_raw = [bytestream.get('>HHHH') for _ in range(except_cnt)]
         self.except_raw = [exceptionHandlerRaw(*t) for t in self.except_raw]
         attributes_raw = get_attributes_raw(bytestream)
-        assert(bytestream.size() == 0)
+        assert bytestream.size() == 0
 
         if self.except_raw:
-            assert(self.stack >= 1)
+            assert self.stack >= 1
 
         # print 'Parsing code for', method.name, method.descriptor, method.flags
-        codestream = binUnpacker.binUnpacker(data = self.bytecode_raw)
+        codestream = Reader(data=self.bytecode_raw)
         self.bytecode = bytecode.parseInstructions(codestream, self.isIdConstructor)
         self.attributes = fixAttributeNames(attributes_raw, self.class_.cpool)
 
         for e in self.except_raw:
-            assert(e.start in self.bytecode)
-            assert(e.end == codelen or e.end in self.bytecode)
-            assert(e.handler in self.bytecode)
+            assert e.start in self.bytecode
+            assert e.end == codelen or e.end in self.bytecode
+            assert e.handler in self.bytecode
         if keepRaw:
             self.attributes_raw = attributes_raw
 
-    #This is a callback passed to the bytecode parser to determine if a given method id represents a constructor
+    # This is a callback passed to the bytecode parser to determine if a given method id represents a constructor
     def isIdConstructor(self, methId):
         args = self.class_.cpool.getArgsCheck('Method', methId)
         return args[1] == '<init>'
@@ -88,7 +89,7 @@ class Method(object):
         self.abstract = 'ABSTRACT' in self.flags
         self.isConstructor = (self.name == '<init>')
 
-        #Prior to version 51.0, <clinit> is still valid even if it isn't marked static
+        # Prior to version 51.0, <clinit> is still valid even if it isn't marked static
         if self.class_.version < (51,0) and self.name == '<clinit>' and self.descriptor == '()V':
             self.static = True
 
@@ -98,16 +99,16 @@ class Method(object):
             self.name_id, self.desc_id = name_id, desc_id
 
     def _checkFlags(self):
-        assert(len(self.flags & set(('PRIVATE','PROTECTED','PUBLIC'))) <= 1)
+        assert len(self.flags & set(('PRIVATE','PROTECTED','PUBLIC'))) <= 1
         if 'ABSTRACT' in self.flags:
-            assert(not self.flags & set(['SYNCHRONIZED', 'PRIVATE', 'FINAL', 'STRICT', 'STATIC', 'NATIVE']))
+            assert not self.flags & set(['SYNCHRONIZED', 'PRIVATE', 'FINAL', 'STRICT', 'STATIC', 'NATIVE'])
 
     def _loadCode(self, keepRaw):
         code_attrs = [a for a in self.attributes if a[0] == 'Code']
         if not (self.native or self.abstract):
-            assert(len(code_attrs) == 1)
+            assert len(code_attrs) == 1
             code_raw = code_attrs[0][1]
-            bytestream = binUnpacker.binUnpacker(code_raw)
+            bytestream = Reader(code_raw)
             return Code(self, bytestream, keepRaw)
-        assert(not code_attrs)
+        assert not code_attrs
         return None

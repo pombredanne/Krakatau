@@ -1,8 +1,8 @@
-from . import constant_pool, method, field
-from .attributes_raw import get_attributes_raw, fixAttributeNames
+from . import constant_pool, field, method
+from .attributes_raw import fixAttributeNames, get_attributes_raw
 
 cp_structFmts = {3: '>i',
-                4: '>i',    #floats and doubles internally represented as integers with same bit pattern
+                4: '>i',    # floats and doubles internally represented as integers with same bit pattern
                 5: '>q',
                 6: '>q',
                 7: '>H',
@@ -17,24 +17,24 @@ cp_structFmts = {3: '>i',
 
 def get_cp_raw(bytestream):
     const_count = bytestream.get('>H')
-    assert(const_count > 1)
+    assert const_count > 1
 
     placeholder = None,None
     pool = [placeholder]
 
     while len(pool) < const_count:
         tag = bytestream.get('B')
-        if tag == 1: #utf8
+        if tag == 1: # utf8
             length = bytestream.get('>H')
             data = bytestream.getRaw(length)
             val = tag, (data,)
         else:
             val = tag,bytestream.get(cp_structFmts[tag], True)
         pool.append(val)
-        #Longs and Doubles take up two spaces in the pool
+        # Longs and Doubles take up two spaces in the pool
         if tag == 5 or tag == 6:
             pool.append(placeholder)
-    assert(len(pool) == const_count)
+    assert len(pool) == const_count
     return pool
 
 def get_field_raw(bytestream):
@@ -46,7 +46,7 @@ def get_fields_raw(bytestream):
     count = bytestream.get('>H')
     return [get_field_raw(bytestream) for _ in range(count)]
 
-#fields and methods have same raw format
+# fields and methods have same raw format
 get_method_raw = get_field_raw
 get_methods_raw = get_fields_raw
 
@@ -68,7 +68,7 @@ class ClassFile(object):
 
     def __init__(self, bytestream):
         magic, minor, major = bytestream.get('>LHH')
-        assert(magic == 0xCAFEBABE)
+        assert magic == 0xCAFEBABE
         self.version = major,minor
 
         const_pool_raw = get_cp_raw(bytestream)
@@ -82,40 +82,17 @@ class ClassFile(object):
 
         ic_indices = [i for i,x in enumerate(const_pool_raw) if x == (1, ("InnerClasses",))]
         self.attributes_raw = get_attributes_raw(bytestream, ic_indices)
-        assert(bytestream.size() == 0)
+        assert bytestream.size() == 0
 
         self.flags = frozenset(name for name,mask in ClassFile.flagVals.items() if (mask & flags))
         self.cpool = constant_pool.ConstPool(const_pool_raw)
         self.name = self.cpool.getArgsCheck('Class', self.this)
         self.elementsLoaded = False
 
-        self.env = self.supername = self.hierarchy = None
+        self.env = self.supername = None
         self.fields = self.methods = self.attributes = None
-        self.all_interfaces = None
-
-    def loadSupers(self, env, name, subclasses):
-        self.env = env
-        assert(self.name == name)
-
         if self.super:
             self.supername = self.cpool.getArgsCheck('Class', self.super)
-            superclass = self.env.getClass(self.supername, subclasses + (name,), partial=True)
-            self.hierarchy = superclass.hierarchy + (self.name,)
-
-            # Now get all interfaces for this class (recursively)
-            interfaces = self.env.getInterfaces(self.supername)
-            if 'INTERFACE' in self.flags:
-                interfaces |= {self.name}
-            for index in self.interfaces_raw:
-                iname = self.cpool.getArgsCheck('Class', index)
-                if iname not in interfaces:
-                    interfaces |= self.env.getInterfaces(iname)
-            self.all_interfaces = interfaces
-        else:
-            assert(name == 'java/lang/Object')
-            self.supername = None
-            self.hierarchy = (self.name,)
-            self.all_interfaces = frozenset()
 
     def loadElements(self, keepRaw=False):
         if self.elementsLoaded:

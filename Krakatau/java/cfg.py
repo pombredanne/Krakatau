@@ -1,8 +1,9 @@
 from collections import defaultdict as ddict
 
-from . import ast
-from ..ssa import objtypes
 from .. import graph_util
+from ..ssa import objtypes
+
+from . import ast
 
 def flattenDict(replace):
     for k in list(replace):
@@ -20,7 +21,7 @@ class DUBlock(object):
         self.lines = []     # 3 types of lines: ('use', var), ('def', (var, var2_opt)), or ('canthrow', None)
         self.e_successors = []
         self.n_successors = []
-        self.vars = None #vars used or defined within the block. Does NOT include caught exceptions
+        self.vars = None # vars used or defined within the block. Does NOT include caught exceptions
 
     def canThrow(self): return ('canthrow', None) in self.lines
 
@@ -50,7 +51,7 @@ class DUBlock(object):
                     self.vars.add(v)
 
     def simplify(self):
-        #try to prune redundant instructions
+        # try to prune redundant instructions
         last = None
         newlines = []
         for line in self.lines:
@@ -70,7 +71,7 @@ def varOrNone(expr):
 def canThrow(expr):
     if isinstance(expr, (ast.ArrayAccess, ast.ArrayCreation, ast.Cast, ast.ClassInstanceCreation, ast.FieldAccess, ast.MethodInvocation)):
         return True
-    if isinstance(expr, ast.BinaryInfix) and expr.opstr in ('/','%'): #check for possible division by 0
+    if isinstance(expr, ast.BinaryInfix) and expr.opstr in ('/','%'): # check for possible division by 0
         return expr.dtype not in (objtypes.FloatTT, objtypes.DoubleTT)
     return False
 
@@ -83,8 +84,8 @@ def visitExpr(expr, lines):
     if isinstance(expr, ast.Assignment):
         lhs, rhs = map(varOrNone, expr.params)
 
-        #with assignment we need to only visit LHS if it isn't a local in order to avoid spurious uses
-        #also, we need to visit RHS before generating the def
+        # with assignment we need to only visit LHS if it isn't a local in order to avoid spurious uses
+        # also, we need to visit RHS before generating the def
         if lhs is None:
             visitExpr(expr.params[0], lines)
         visitExpr(expr.params[1], lines)
@@ -110,23 +111,23 @@ class DUGraph(object):
             parent.n_successors.append(block)
         del break_dict[block.key]
 
-        assert((myexcept_parents is None) == (caught_except is None))
-        if caught_except is not None: #this is the head of a catch block:
+        assert (myexcept_parents is None) == (caught_except is None)
+        if caught_except is not None: # this is the head of a catch block:
             block.caught_excepts = (caught_except,)
             for parent in myexcept_parents:
                 parent.e_successors.append(block)
         return block
 
     def finishBlock(self, block, catch_stack):
-        #register exception handlers for completed old block and calculate var set
-        assert(block.vars is None) #make sure it wasn't finished twice
+        # register exception handlers for completed old block and calculate var set
+        assert(block.vars is None) # make sure it wasn't finished twice
         if block.canThrow():
             for clist in catch_stack:
                 clist.append(block)
         block.recalcVars()
 
     def visitScope(self, scope, break_dict, catch_stack, caught_except=None, myexcept_parents=None, head_block=None):
-        #catch_stack is copy on modify
+        # catch_stack is copy on modify
         if head_block is None:
             head_block = block = self.makeBlock(scope.continueKey, break_dict, caught_except, myexcept_parents)
         else:
@@ -139,8 +140,8 @@ class DUGraph(object):
                     block.lines.append(('canthrow', None))
                 continue
 
-            #compound statements
-            assert(stmt.continueKey is not None)
+            # compound statements
+            assert stmt.continueKey is not None
             if isinstance(stmt, (ast.IfStatement, ast.SwitchStatement)):
                 visitExpr(stmt.expr, block.lines)
 
@@ -156,15 +157,12 @@ class DUGraph(object):
                     break_dict[stmt.breakKey].append(block)
 
             elif isinstance(stmt, ast.WhileStatement):
-                if stmt.expr != ast.Literal.TRUE: #while(cond)
-                    assert(stmt.breakKey is not None)
-                    assert(stmt.continueKey != stmt.getScopes()[0].continueKey)
+                if stmt.expr != ast.Literal.TRUE: # while(cond)
+                    assert stmt.breakKey is not None
                     self.finishBlock(block, catch_stack)
                     block = self.makeBlock(stmt.continueKey, break_dict, None, None)
                     visitExpr(stmt.expr, block.lines)
                     break_dict[stmt.breakKey].append(block)
-                else:
-                    assert(stmt.continueKey == stmt.getScopes()[0].continueKey)
 
                 break_dict[stmt.continueKey].append(block)
                 body_block = self.visitScope(stmt.getScopes()[0], break_dict, catch_stack)
@@ -183,31 +181,31 @@ class DUGraph(object):
                 for cdecl, catchb in stmt.pairs:
                     parents = new_stack.pop()
                     self.visitScope(catchb, break_dict, catch_stack, cdecl.local, parents)
-                assert(new_stack == catch_stack)
+                assert new_stack == catch_stack
             else:
-                assert(isinstance(stmt, ast.StatementBlock))
+                assert isinstance(stmt, ast.StatementBlock)
                 break_dict[stmt.continueKey].append(block)
                 self.visitScope(stmt, break_dict, catch_stack, head_block=block)
 
-            if not isinstance(stmt, ast.StatementBlock): #if we passed it to subscope, it will be finished in the subcall
+            if not isinstance(stmt, ast.StatementBlock): # if we passed it to subscope, it will be finished in the subcall
                 self.finishBlock(block, catch_stack)
 
             if stmt.breakKey is not None: # start new block after return from compound statement
                 block = self.makeBlock(stmt.breakKey, break_dict, None, None)
             else:
-                block = None #should never be accessed anyway if we're exiting abruptly
+                block = None # should never be accessed anyway if we're exiting abruptly
 
         if scope.jumpKey is not None:
             break_dict[scope.jumpKey].append(block)
 
         if block is not None:
             self.finishBlock(block, catch_stack)
-        return head_block #head needs to be returned in case of loops so we can fix up backedges
+        return head_block # head needs to be returned in case of loops so we can fix up backedges
 
     def makeCFG(self, root):
         break_dict = ddict(list)
         self.visitScope(root, break_dict, [])
-        self.entry = self.blocks[0] #entry point should always be first block generated
+        self.entry = self.blocks[0] # entry point should always be first block generated
 
         reached = graph_util.topologicalSort([self.entry], lambda block:(block.n_successors + block.e_successors))
         # if len(reached) != len(self.blocks):

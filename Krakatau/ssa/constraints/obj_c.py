@@ -1,7 +1,7 @@
 import itertools
-from ..mixin import ValueType
-from .int_c import IntConstraint
+
 from .. import objtypes
+from ..mixin import ValueType
 
 array_supers = 'java/lang/Object','java/lang/Cloneable','java/io/Serializable'
 obj_fset = frozenset([objtypes.ObjectTT])
@@ -16,19 +16,15 @@ class TypeConstraint(ValueType):
         self.isBot = objtypes.ObjectTT in supers
 
         temp = self.supers | self.exact
-        assert(objtypes.NullTT not in temp)
-        assert(all(objtypes.isBaseTClass(tt) for tt in supers))
-        assert(all(objtypes.dim(tt) < 999 for tt in exact))
-
-    @staticmethod
-    def fromTops(*args):
-        return TypeConstraint(*args)
+        assert objtypes.NullTT not in temp
+        assert all(objtypes.isBaseTClass(tt) for tt in supers)
+        assert all(objtypes.dim(tt) < 999 for tt in exact)
 
     def _key(self): return self.supers, self.exact
     def __nonzero__(self): return bool(self.supers or self.exact)
 
     def getSingleTType(self):
-        #comSuper doesn't care about order so we can freely pass in nondeterministic order
+        # comSuper doesn't care about order so we can freely pass in nondeterministic order
         return objtypes.commonSupertype(self.env, list(self.supers) + list(self.exact))
 
     def isBoolOrByteArray(self):
@@ -50,16 +46,16 @@ class TypeConstraint(ValueType):
         return TypeConstraint(env, newsupers, newexact)
 
     def join(*cons):
-        assert(len(set(map(type, cons))) == 1)
+        assert len(set(map(type, cons))) == 1
         env = cons[0].env
 
-        #optimize for the common case of joining with itself or with bot
+        # optimize for the common case of joining with itself or with bot
         cons = set(c for c in cons if not c.isBot)
         if not cons:
             return TypeConstraint(env, obj_fset, [])
         elif len(cons) == 1:
             return cons.pop()
-        assert(len(cons) == 2) #joining more than 2 not currently supported
+        assert(len(cons) == 2) # joining more than 2 not currently supported
 
         supers_l, exact_l = zip(*(c._key() for c in cons))
 
@@ -69,7 +65,7 @@ class TypeConstraint(ValueType):
                 newsupers.add(t1)
             elif objtypes.isSubtype(env, t2, t1):
                 newsupers.add(t2)
-            else: #TODO: need to add special handling for interfaces here
+            else: # TODO: need to add special handling for interfaces here
                 pass
 
         newexact = frozenset.union(*exact_l)
@@ -83,7 +79,7 @@ class TypeConstraint(ValueType):
         return TypeConstraint.reduce(cons[0].env, supers, exact)
 
 class ObjectConstraint(ValueType):
-    __slots__ = "null types arrlen isBot".split()
+    __slots__ = "null types isBot".split()
     def __init__(self, null, types):
         self.null, self.types = null, types
         self.isBot = null and types.isBot
@@ -119,3 +115,9 @@ class ObjectConstraint(ValueType):
         null = any(c.null for c in cons)
         types = TypeConstraint.meet(*(c.types for c in cons))
         return  ObjectConstraint(null, types)
+
+    def __str__(self):
+        if not self.types:
+            return 'Obj(null)'
+        return 'Obj({}, {}, {})'.format(self.null, sorted(self.types.supers), sorted(self.types.exact))
+    __repr__ = __str__

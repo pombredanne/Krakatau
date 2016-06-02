@@ -2,5 +2,4 @@
 *.pyo
 test*.py
 Krakatau/plugins/*
-cache.txt
-tests/*.test
+tests/.cache

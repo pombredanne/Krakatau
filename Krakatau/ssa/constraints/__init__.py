@@ -5,22 +5,21 @@ from .. import objtypes
 from .int_c import IntConstraint
 from .float_c import FloatConstraint
 from .obj_c import ObjectConstraint
-from .monad_c import MonadConstraint as DummyConstraint
 
-from ..ssa_types import SSA_INT, SSA_LONG, SSA_FLOAT, SSA_DOUBLE, SSA_OBJECT, SSA_MONAD
+from ..ssa_types import SSA_INT, SSA_LONG, SSA_FLOAT, SSA_DOUBLE, SSA_OBJECT
 
-#joins become more precise (intersection), meets become more general (union)
-#Join currently supports joining a max of two constraints
-#Meet assumes all inputs are not None
+# joins become more precise (intersection), meets become more general (union)
+# Join currently supports joining a max of two constraints
+# Meet assumes all inputs are not None
 def join(*cons):
     if None in cons:
         return None
     return cons[0].join(*cons[1:])
 
 def meet(*cons):
+    if not cons:
+        return None
     return cons[0].meet(*cons[1:])
-
-DUMMY = DummyConstraint()
 
 def fromConstant(env, var):
     ssa_type = var.type
@@ -35,14 +34,12 @@ def fromConstant(env, var):
         if var.decltype == objtypes.NullTT:
             return ObjectConstraint.constNull(env)
         return ObjectConstraint.fromTops(env, *objtypes.declTypeToActual(env, var.decltype))
-    return DUMMY
 
 _bots = {
     SSA_INT: IntConstraint.bot(SSA_INT[1]),
     SSA_LONG: IntConstraint.bot(SSA_LONG[1]),
     SSA_FLOAT: FloatConstraint.bot(SSA_FLOAT[1]),
     SSA_DOUBLE: FloatConstraint.bot(SSA_DOUBLE[1]),
-    SSA_MONAD: DUMMY
 }
 
 def fromVariable(env, var):
@@ -53,10 +50,17 @@ def fromVariable(env, var):
     try:
         return _bots[ssa_type]
     except KeyError:
-        assert(ssa_type == SSA_OBJECT)
+        assert ssa_type == SSA_OBJECT
+        isnew = var.uninit_orig_num is not None
         if var.decltype is not None:
             if var.decltype == objtypes.NullTT:
                 return ObjectConstraint.constNull(env)
-            return ObjectConstraint.fromTops(env, *objtypes.declTypeToActual(env, var.decltype))
+            return ObjectConstraint.fromTops(env, *objtypes.declTypeToActual(env, var.decltype), nonnull=isnew)
         else:
-            return ObjectConstraint.fromTops(env, [objtypes.ObjectTT], [])
+            return ObjectConstraint.fromTops(env, [objtypes.ObjectTT], [], nonnull=isnew)
+
+OpReturnInfo = collections.namedtuple('OpReturnInfo', ['rval', 'eval', 'must_throw'])
+def returnOrThrow(rval, eval): return OpReturnInfo(rval, eval, False)
+def maybeThrow(eval): return OpReturnInfo(None, eval, False)
+def throw(eval): return OpReturnInfo(None, eval, True)
+def return_(rval): return OpReturnInfo(rval, None, False)

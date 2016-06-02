@@ -9,7 +9,7 @@ def update(self, items):
 
 class SEBlockItem(object):
     def __init__(self, node):
-        self.successors = node.norm_suc_nl #don't include backedges or exceptional edges
+        self.successors = node.norm_suc_nl # don't include backedges or exceptional edges
         self.node = node
         self.nodes = frozenset([node])
         self.entryBlock = node
@@ -34,14 +34,14 @@ class SETry(object):
     def __init__(self, tryscope, catchscope, toptts, catchvar):
         self.scopes = tryscope, catchscope
         self.toptts = toptts
-        self.catchvar = catchvar #none if ignored
+        self.catchvar = catchvar # none if ignored
         update(self, self.scopes)
 
     def getScopes(self): return self.scopes
 
 class SEIf(object):
     def __init__(self, head, newscopes):
-        assert(len(newscopes) == 2)
+        assert len(newscopes) == 2
         self.scopes = newscopes
         self.head = head
         update(self, [head] + newscopes)
@@ -57,7 +57,7 @@ class SESwitch(object):
 
         jump = head.node.block.jump
         keysets = {head.node.blockdict[b.key,False]:jump.reverse.get(b) for b in jump.getNormalSuccessors()}
-        assert(keysets.values().count(None) == 1)
+        assert keysets.values().count(None) == 1
         self.ordered_keysets = [keysets[item.entryBlock] for item in newscopes]
 
     def getScopes(self): return self.scopes

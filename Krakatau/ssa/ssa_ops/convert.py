@@ -1,5 +1,4 @@
 from .base import BaseOp
-from ..constraints import IntConstraint, FloatConstraint
 
 class Convert(BaseOp):
     def __init__(self, parent, arg, source_ssa, target_ssa):

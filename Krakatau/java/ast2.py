@@ -1,6 +1,7 @@
+from ..ssa import objtypes
+
 from . import ast
 from .stringescape import escapeString as escape
-from ..ssa import objtypes
 
 class Comments(object):
     def __init__(self):
@@ -10,7 +11,7 @@ class Comments(object):
         self.lines.extend(s.strip('\n').split('\n'))
 
     def print_(self, printer, print_):
-        return ''.join(map('//{}\n'.format, self.lines))
+        return ''.join(map('// {}\n'.format, self.lines))
 
 class MethodDef(object):
     def __init__(self, class_, flags, name, desc, retType, paramDecls, body):
@@ -19,6 +20,7 @@ class MethodDef(object):
         self.body = body
         self.comments = Comments()
         self.triple = class_.name, name, desc
+        self.throws = None
 
         if name == '<clinit>':
             self.isStaticInit, self.isConstructor = True, False
@@ -40,7 +42,13 @@ class MethodDef(object):
             name = printer.methodName(*self.triple)
             header += '{}{} {}({})'.format(self.flagstr, print_(self.retType), escape(name), argstr)
 
+        if self.throws is not None:
+            header += ' throws ' + print_(self.throws)
+
         if self.body is None:
+            if 'abstract' not in self.flagstr and 'native' not in self.flagstr:
+                # Create dummy body for decompiler error
+                return header + ' {/*error*/throw null;}\n'
             return header + ';\n'
         else:
             return header + '\n' + print_(self.body)
@@ -53,6 +61,7 @@ class MethodDef(object):
             'params': map(tree, self.paramDecls),
             'comments': self.comments.lines,
             'body': tree(self.body),
+            'throws': tree(self.throws),
         }
 
 class FieldDef(object):
@@ -95,7 +104,7 @@ class ClassDef(object):
             contents = '\n'.join(print_(x) for x in self.fields)
         if self.methods:
             if contents:
-                contents += '\n\n' #extra line to divide fields and methods
+                contents += '\n\n' # extra line to divide fields and methods
             contents += '\n\n'.join(print_(x) for x in self.methods)
 
         indented = ['    '+line for line in contents.splitlines()]
@@ -107,17 +116,18 @@ class ClassDef(object):
             header += ' extends ' + print_(self.super)
         if self.interfaces:
             if self.isInterface:
-                assert(self.super is None)
+                assert self.super is None
                 header += ' extends ' + ', '.join(print_(x) for x in self.interfaces)
             else:
                 header += ' implements ' + ', '.join(print_(x) for x in self.interfaces)
 
         lines = [header + ' {'] + indented + ['}']
-        return '\n'.join(lines)
+        return '\n'.join(lines) + '\n'
 
     # Experimental - don't use!
     def tree(self, printer, tree):
         return {
+            'rawname': objtypes.className(self.name.tt),
             'name': tree(self.name),
             'super': tree(self.super),
             'flags': self.flagstr.split(),
