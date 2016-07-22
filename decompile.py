@@ -7,6 +7,7 @@ import Krakatau.ssa
 from Krakatau.error import ClassLoaderError
 from Krakatau.environment import Environment
 from Krakatau.java import javaclass, visitor
+from Krakatau.java.stringescape import escapeString
 from Krakatau.verifier.inference_verifier import verifyBytecode
 from Krakatau import script_util
 
@@ -92,17 +93,17 @@ def decompileClass(path=[], targets=None, outpath=None, skip_errors=False, add_t
     with e, out:
         printer = visitor.DefaultVisitor()
         for i,target in enumerate(targets):
-            print 'processing target {}, {} remaining'.format(target.encode('utf8'), len(targets)-i)
+            print 'processing target {}, {} remaining'.format(target, len(targets)-i)
 
             try:
-                c = e.getClass(target)
+                c = e.getClass(target.decode('utf8'))
                 makeGraphCB = functools.partial(makeGraph, magic_throw)
                 source = printer.visit(javaclass.generateAST(c, makeGraphCB, skip_errors, add_throws=add_throws))
             except Exception as err:
                 if not skip_errors:
                     raise
                 if isinstance(err, ClassLoaderError):
-                    print 'Failed to decompile {} due to missing or invalid class {}'.format(target.encode('utf8'), err.data.encode('utf8'))
+                    print 'Failed to decompile {} due to missing or invalid class {}'.format(target, err.data)
                 else:
                     import traceback
                     print traceback.format_exc()
@@ -110,11 +111,11 @@ def decompileClass(path=[], targets=None, outpath=None, skip_errors=False, add_t
 
             # The single class decompiler doesn't add package declaration currently so we add it here
             if '/' in target:
-                package = 'package {};\n\n'.format(target.replace('/','.').rpartition('.')[0])
+                package = 'package {};\n\n'.format(escapeString(target.replace('/','.').rpartition('.')[0]))
                 source = package + source
 
-            filename = out.write(c.name, source)
-            print 'Class written to', filename.encode('utf8')
+            filename = out.write(c.name.encode('utf8'), source)
+            print 'Class written to', filename
             print time.time() - start_time, ' seconds elapsed'
             deleteUnusued(c)
         print len(e.classes) - len(targets), 'extra classes loaded'
